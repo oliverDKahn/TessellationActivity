@@ -11,7 +11,10 @@
  *
  * It then captures mouse/touch input over the SVG, renders each stroke as
  * an SVG <path> in real time, constrains drawing to inside the shape's
- * polygon, and exposes Undo/Clear.
+ * polygon, and exposes Undo/Clear. Straying outside the polygon mid-drag
+ * doesn't end the stroke — it pauses it, and picks back up as a new
+ * subpath (no connecting line across the gap) once the pointer returns,
+ * for as long as the pointer stays down.
  *
  * Coordinates are recorded in the SVG's own viewBox space (960x720, see
  * shapes.js), not raw screen pixels. That keeps stroke data
@@ -36,6 +39,15 @@
 	const STROKE_COLOR = '#f6f7f9'; // light, visible against the dark night background
 	const STROKE_WIDTH = 10;
 	const MIN_POINT_SPACING = 2; // svg units; drop points closer together than this
+
+	// Shared across every FreehandCanvas on the page (not a per-instance
+	// counter) so stroke <path> ids stay globally unique even with several
+	// canvases — e.g. sixfoldRosette.html's star + rhombus. Two elements
+	// with the same id is invalid HTML/SVG, and <use href="#id"> resolves
+	// ambiguously when it happens: once a second canvas reused an id, its
+	// propagated clones (and the first canvas's) could suddenly point at
+	// the wrong stroke.
+	let nextStrokeId = 1;
 
 	/**
 	 * Build a smoothed SVG path "d" string from a list of {x, y} points,
@@ -126,11 +138,11 @@
 			this.svg = svg;
 			this.strokesGroup = strokesGroup;
 			this.polygon = polygon || null;
-			this.strokes = []; // { points: [{x, y}], el: SVGPathElement, cloneGroup: SVGGElement|null }
+			this.strokes = []; // { segments: [{x, y}][], el: SVGPathElement, cloneGroup: SVGGElement|null }
 			this.activeStroke = null;
 			this.propagation = null; // { group: SVGGElement, transforms: string[] } — see setPropagation
 			this.onCommit = null; // optional callback fired after a stroke is committed — lets a page coordinate Undo across multiple canvases
-			this._nextStrokeId = 1;
+			this._pendingEntry = false; // pressed outside the shape, waiting for the pointer to enter before drawing starts
 
 			this._onPointerDown = this._onPointerDown.bind(this);
 			this._onPointerMove = this._onPointerMove.bind(this);
@@ -160,50 +172,84 @@
 			return window.ShapeGeometry.isPointInPolygon(point, this.polygon);
 		}
 
+		/** Start a new stroke at `point` (already confirmed in-bounds). */
+		_beginStroke(point) {
+			const el = createStrokePathElement();
+			el.id = `freehand-stroke-${nextStrokeId++}`;
+			this.strokesGroup.appendChild(el);
+
+			// segments: an array of point-lists. Leaving the shape mid-drag
+			// doesn't end the stroke (see _onPointerMove) — it starts a new
+			// segment once the pointer comes back inside, so the drawing
+			// resumes without a spurious line jumping across the gap.
+			this.activeStroke = { segments: [[point]], needsNewSegment: false, el, cloneGroup: this._createPropagationClones(el.id) };
+			this._redrawActiveStroke();
+		}
+
 		_onPointerDown(evt) {
 			if (evt.button !== undefined && evt.button > 0) return; // primary button/touch only
-
-			const point = this._toCanvasPoint(evt);
-			if (!this._isInBounds(point)) return; // presses outside the shape don't start a stroke
 
 			evt.preventDefault();
 			this.svg.setPointerCapture(evt.pointerId);
 
-			const el = createStrokePathElement();
-			el.id = `freehand-stroke-${this._nextStrokeId++}`;
-			this.strokesGroup.appendChild(el);
-
-			this.activeStroke = { points: [point], el, cloneGroup: this._createPropagationClones(el.id) };
-			this._redrawActiveStroke();
+			const point = this._toCanvasPoint(evt);
+			if (this._isInBounds(point)) {
+				this._beginStroke(point);
+			} else {
+				// Press started outside the shape: wait for the pointer to enter
+				// (still held down) before drawing anything — see _onPointerMove.
+				this._pendingEntry = true;
+			}
 		}
 
 		_onPointerMove(evt) {
-			if (!this.activeStroke) return;
+			if (!this.activeStroke && !this._pendingEntry) return;
 
 			const point = this._toCanvasPoint(evt);
-			if (!this._isInBounds(point)) {
-				// Pointer left the shape mid-drag: end the stroke here, same as
-				// lifting the pen. Drawing resumes on the next press inside the
-				// shape, rather than jumping a straight line back in once the
-				// pointer re-enters.
-				this._onPointerEnd();
+			const inBounds = this._isInBounds(point);
+
+			if (!this.activeStroke) {
+				// Still waiting for the initial press-outside-then-drag-in entry.
+				if (!inBounds) return;
+				evt.preventDefault();
+				this._pendingEntry = false;
+				this._beginStroke(point);
+				return;
+			}
+
+			if (!inBounds) {
+				// Pointer left the shape mid-drag: pause (don't record anything
+				// out here) and remember to start a new segment once it's back
+				// inside, rather than connecting across the gap with a line.
+				this.activeStroke.needsNewSegment = true;
 				return;
 			}
 
 			evt.preventDefault();
-			const last = this.activeStroke.points[this.activeStroke.points.length - 1];
+
+			if (this.activeStroke.needsNewSegment) {
+				this.activeStroke.segments.push([point]);
+				this.activeStroke.needsNewSegment = false;
+				this._redrawActiveStroke();
+				return;
+			}
+
+			const segment = this.activeStroke.segments[this.activeStroke.segments.length - 1];
+			const last = segment[segment.length - 1];
 			const dx = point.x - last.x;
 			const dy = point.y - last.y;
 			if (dx * dx + dy * dy < MIN_POINT_SPACING * MIN_POINT_SPACING) return;
 
-			this.activeStroke.points.push(point);
+			segment.push(point);
 			this._redrawActiveStroke();
 		}
 
 		_onPointerEnd() {
+			this._pendingEntry = false;
 			if (!this.activeStroke) return;
 
-			if (this.activeStroke.points.length < 2) {
+			const totalPoints = this.activeStroke.segments.reduce((sum, segment) => sum + segment.length, 0);
+			if (totalPoints < 2) {
 				// A stray tap with no drag: nothing worth keeping.
 				this.activeStroke.el.remove();
 				if (this.activeStroke.cloneGroup) this.activeStroke.cloneGroup.remove();
@@ -215,7 +261,8 @@
 		}
 
 		_redrawActiveStroke() {
-			this.activeStroke.el.setAttribute('d', pointsToPathData(this.activeStroke.points));
+			const d = this.activeStroke.segments.map(pointsToPathData).join(' ');
+			this.activeStroke.el.setAttribute('d', d);
 		}
 
 		/**
@@ -264,9 +311,9 @@
 			this.strokes = [];
 		}
 
-		/** Read-only access to recorded strokes, e.g. for future propagation logic. */
+		/** Read-only access to recorded strokes (as their segments), e.g. for future propagation logic. */
 		getStrokes() {
-			return this.strokes.map((stroke) => stroke.points.slice());
+			return this.strokes.map((stroke) => stroke.segments.map((segment) => segment.slice()));
 		}
 	}
 
@@ -303,6 +350,23 @@
 			})
 			.filter(Boolean);
 		if (canvases.length === 0) return null;
+
+		// Safety net: each canvas's own pointerup/pointercancel listener
+		// (backed by setPointerCapture) is supposed to finalize its stroke
+		// regardless of where the pointer ends up — but that can fail in
+		// practice (releasing outside the browser window, browser-specific
+		// capture quirks), leaving a stroke stuck as an unfinished
+		// activeStroke: still drawn on screen, but invisible to Undo/Clear,
+		// which only look at completed strokes. A new press anywhere, or
+		// the window losing focus, means any prior gesture has definitely
+		// ended — use either as a cue to finalize defensively.
+		function finalizeAnyStuckStrokes() {
+			canvases.forEach((canvas) => {
+				if (canvas.activeStroke) canvas._onPointerEnd();
+			});
+		}
+		window.addEventListener('pointerdown', finalizeAnyStuckStrokes, true); // capture phase: runs before the new press's own handler
+		window.addEventListener('blur', finalizeAnyStuckStrokes);
 
 		const undoButton = root.querySelector('.undo-button');
 		const clearButton = root.querySelector('.clear-button');

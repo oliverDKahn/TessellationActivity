@@ -136,7 +136,8 @@ h1 {
 	width: min(85%, 18rem);
 }
 
-/* Two shape canvases stacked vertically (e.g. sixfoldRosette.html's star + rhombus). */
+/* Several shape canvases stacked vertically (sixfoldRosette.html's star +
+   rhombus; threeShape.html's three component shapes). */
 .shape-canvas-stack {
 	align-items: center;
 	display: flex;

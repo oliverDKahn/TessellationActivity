@@ -15,10 +15,13 @@
  * sync for free, since FreehandCanvas removes each stroke's clones along
  * with the stroke itself.
  *
- * Which tessellation gets built is decided by the page's own shape canvas
- * (.shape-svg[data-shape]) — see the TESSELLATION_BUILDERS map below. Pages
- * without a matching builder (or without a .tessellation-svg at all) simply
- * get no tessellation preview.
+ * Which tessellation gets built is decided by the workspace SVG's own
+ * data-tessellation attribute — see the TESSELLATION_BUILDERS map below.
+ * Pages without a matching builder (or without a .tessellation-svg at all)
+ * simply get no tessellation preview. (This used to be inferred from the
+ * page's .shape-svg[data-shape], but that breaks once a page can have more
+ * than one shape canvas — e.g. sixfoldRosette.html's star + rhombus — so
+ * each tessellation now names itself explicitly.)
  */
 (function () {
 	'use strict';
@@ -165,10 +168,133 @@
 		return { linesGroup, strokesTarget, transforms };
 	}
 
+	const ROSETTE_PADDING = 40; // svg units of clearance around the assembled tiling
+	const ROSETTE_RINGS = 3; // rings of rosettes around the center one — 1 ring = 7 rosettes = 7 stars
+
+	/**
+	 * The "six-fold rosette" motif — one star with a rhombus nestled into
+	 * each of its 6 valleys — repeated across ROSETTE_RINGS rings of
+	 * neighbors (7 rosettes, 7 stars, at ROSETTE_RINGS=1), spaced so
+	 * adjacent rosettes' connecting rhombi are shared rather than merely
+	 * close — see sixfoldRosetteTiling's docs.
+	 *
+	 * Unlike the single-shape tessellations, there are two independent
+	 * "master shapes" here (the star canvas and the rhombus canvas), each
+	 * propagating into its own cells — so this returns `propagationTargets`
+	 * (one entry per shape) instead of a single strokesTarget/transforms
+	 * pair. Star cells only ever need translating/scaling (never rotating —
+	 * see sixfoldRosetteTiling); rhombus cells need whatever rotation each
+	 * one took to nestle into its star's valley.
+	 *
+	 * No per-cell clip-path here (unlike the other tessellations' one big
+	 * envelope clip) — with dozens of star copies and hundreds of rhombus
+	 * copies at higher ring counts, clipping every one individually isn't
+	 * worth it: since every cell is an exact similarity-transformed copy of
+	 * its own already-constrained master shape, content mathematically
+	 * cannot spill past its own cell's boundary.
+	 */
+	function buildSixfoldRosetteTessellation(svg) {
+		const G = window.ShapeGeometry;
+		const star = G.SHAPES.star;
+		const rhombus = G.SHAPES.rhombus;
+		const tiling = G.sixfoldRosetteTiling(star, rhombus, ROSETTE_RINGS, G.VIEWBOX_WIDTH, G.VIEWBOX_HEIGHT, ROSETTE_PADDING);
+
+		const linesGroup = createSvgEl('g', {
+			class: 'tessellation-lines',
+			fill: 'none',
+			stroke: LINE_COLOR,
+			'stroke-width': String(LINE_WIDTH),
+		});
+		// Separate per-shape, always-visible targets for propagated strokes —
+		// kept out of linesGroup so drawings stay visible with borders off.
+		const starStrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+		const rhombusStrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+
+		const starPoints = G.pointsAttr(star.vertices);
+		const rhombusPoints = G.pointsAttr(rhombus.vertices);
+		tiling.forEach(({ starTransform, rhombusTransforms }) => {
+			const starGroup = createSvgEl('g', { transform: G.svgMatrixString(starTransform) });
+			starGroup.appendChild(createSvgEl('polygon', { points: starPoints }));
+			linesGroup.appendChild(starGroup);
+
+			rhombusTransforms.forEach((t) => {
+				const rhombusGroup = createSvgEl('g', { transform: G.svgMatrixString(t) });
+				rhombusGroup.appendChild(createSvgEl('polygon', { points: rhombusPoints }));
+				linesGroup.appendChild(rhombusGroup);
+			});
+		});
+
+		svg.append(linesGroup, starStrokesTarget, rhombusStrokesTarget);
+
+		const starTransforms = tiling.map((t) => G.svgMatrixString(t.starTransform));
+		const rhombusTransforms = tiling.flatMap((t) => t.rhombusTransforms.map((rt) => G.svgMatrixString(rt)));
+
+		return {
+			linesGroup,
+			propagationTargets: [
+				{ shapeName: 'star', group: starStrokesTarget, transforms: starTransforms },
+				{ shapeName: 'rhombus', group: rhombusStrokesTarget, transforms: rhombusTransforms },
+			],
+		};
+	}
+
+	const THREE_SHAPE_RINGS = 2; // rings of dodecagons around the center one — 19 dodecagons, 54 hexagons, 72 squares
+	const THREE_SHAPE_PADDING = 40;
+
+	/**
+	 * The "4.6.12" tiling — a dodecagon, hexagon, and square meeting at
+	 * every vertex (see threeShapeRingPlacements in shapes.js) — repeated
+	 * across THREE_SHAPE_RINGS rings of dodecagons. Structurally identical
+	 * to buildSixfoldRosetteTessellation (no per-cell clip-path, since
+	 * every cell is an exact similarity-transformed copy of its own
+	 * already-constrained master shape) but with three master shapes
+	 * instead of two.
+	 */
+	function buildThreeShapeTessellation(svg) {
+		const G = window.ShapeGeometry;
+		const dodecagon = G.SHAPES.threeShapeDodecagon;
+		const hexagon = G.SHAPES.threeShapeHexagon;
+		const square = G.SHAPES.threeShapeSquare;
+		const tiling = G.threeShapeTiling(dodecagon, hexagon, square, THREE_SHAPE_RINGS, G.VIEWBOX_WIDTH, G.VIEWBOX_HEIGHT, THREE_SHAPE_PADDING);
+
+		const linesGroup = createSvgEl('g', {
+			class: 'tessellation-lines',
+			fill: 'none',
+			stroke: LINE_COLOR,
+			'stroke-width': String(LINE_WIDTH),
+		});
+
+		const dodecagonPoints = G.pointsAttr(dodecagon.vertices);
+		const hexagonPoints = G.pointsAttr(hexagon.vertices);
+		const squarePoints = G.pointsAttr(square.vertices);
+		tiling.forEach(({ dodecagonTransform, hexTransforms, squareTransforms }) => {
+			const dodecagonGroup = createSvgEl('g', { transform: G.svgMatrixString(dodecagonTransform) });
+			dodecagonGroup.appendChild(createSvgEl('polygon', { points: dodecagonPoints }));
+			linesGroup.appendChild(dodecagonGroup);
+
+			hexTransforms.forEach((t) => {
+				const hexGroup = createSvgEl('g', { transform: G.svgMatrixString(t) });
+				hexGroup.appendChild(createSvgEl('polygon', { points: hexagonPoints }));
+				linesGroup.appendChild(hexGroup);
+			});
+			squareTransforms.forEach((t) => {
+				const squareGroup = createSvgEl('g', { transform: G.svgMatrixString(t) });
+				squareGroup.appendChild(createSvgEl('polygon', { points: squarePoints }));
+				linesGroup.appendChild(squareGroup);
+			});
+		});
+
+		svg.append(linesGroup);
+
+		return { linesGroup };
+	}
+
 	const TESSELLATION_BUILDERS = {
 		triangle: buildTriangleTessellation,
 		square: buildSquareTessellation,
 		hexagon: buildHexagonTessellation,
+		sixfoldRosette: buildSixfoldRosetteTessellation,
+		threeShape: buildThreeShapeTessellation,
 	};
 
 	/** Find the workspace tessellation SVG + toggle button and wire everything together. */
@@ -177,12 +303,10 @@
 		const svg = root.querySelector('.tessellation-svg');
 		if (!svg) return null;
 
-		const shapeSvg = root.querySelector('.shape-svg');
-		const shapeName = shapeSvg && shapeSvg.dataset.shape;
-		const builder = TESSELLATION_BUILDERS[shapeName];
+		const builder = TESSELLATION_BUILDERS[svg.dataset.tessellation];
 		if (!builder) return null;
 
-		const { linesGroup, strokesTarget, transforms } = builder(svg);
+		const { linesGroup, strokesTarget, transforms, propagationTargets } = builder(svg);
 		linesGroup.classList.add('is-hidden'); // hidden until the button is first pressed
 
 		const button = root.querySelector('.borders-button');
@@ -193,8 +317,22 @@
 			});
 		}
 
-		const drawingCanvas = window.ShapeDrawing && window.ShapeDrawing.instance;
-		if (drawingCanvas) drawingCanvas.setPropagation({ group: strokesTarget, transforms });
+		// ShapeDrawing.instance is one FreehandCanvas on a single-shape page
+		// (triangle/square/hexagon), or an array on a page with several shape
+		// canvases (e.g. sixfoldRosette.html's star + rhombus).
+		const instance = window.ShapeDrawing && window.ShapeDrawing.instance;
+		const canvases = Array.isArray(instance) ? instance : instance ? [instance] : [];
+
+		if (propagationTargets) {
+			// Multi-shape page: each target names which canvas's strokes it wants.
+			propagationTargets.forEach((target) => {
+				const canvas = canvases.find((c) => c.svg.dataset.shape === target.shapeName);
+				if (canvas) canvas.setPropagation({ group: target.group, transforms: target.transforms });
+			});
+		} else if (strokesTarget && transforms && canvases.length === 1) {
+			// Single-shape page: the one canvas found is assumed to match.
+			canvases[0].setPropagation({ group: strokesTarget, transforms });
+		}
 
 		return { linesGroup, strokesTarget };
 	}

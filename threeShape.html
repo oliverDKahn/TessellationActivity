@@ -3,13 +3,13 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Square Activity</title>
+		<title>Three-Shape Activity</title>
 		<link rel="stylesheet" href="styles.css">
 	</head>
 	<body class="activity-page">
 		<div class="workspace" aria-label="Tessellation preview">
 			<div class="tessellation-canvas">
-				<svg class="tessellation-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-tessellation="square" aria-hidden="true"></svg>
+				<svg class="tessellation-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-tessellation="threeShape" aria-hidden="true"></svg>
 			</div>
 			<button type="button" class="icon-button borders-button" aria-pressed="false">
 				<img src="bordersButton.png" alt="Toggle borders">
@@ -17,8 +17,16 @@
 		</div>
 		<aside class="sidebar">
 			<div class="outline-wrap">
-				<div class="shape-canvas">
-					<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="square" role="img" aria-label="Square outline; drag inside it to draw"></svg>
+				<div class="shape-canvas-stack">
+					<div class="shape-canvas">
+						<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="threeShapeDodecagon" role="img" aria-label="Dodecagon outline; drag inside it to draw"></svg>
+					</div>
+					<div class="shape-canvas">
+						<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="threeShapeHexagon" role="img" aria-label="Hexagon outline; drag inside it to draw"></svg>
+					</div>
+					<div class="shape-canvas">
+						<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="threeShapeSquare" role="img" aria-label="Square outline; drag inside it to draw"></svg>
+					</div>
 				</div>
 			</div>
 			<div class="draw-toolbar">
