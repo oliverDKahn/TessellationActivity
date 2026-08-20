@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Square Activity</title>
+		<link rel="stylesheet" href="styles.css">
+	</head>
+	<body class="activity-page">
+		<div class="workspace" aria-label="Drawing area"></div>
+		<aside class="sidebar">
+			<div class="outline-wrap">
+				<div class="shape-canvas">
+					<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="square" role="img" aria-label="Square outline; drag inside it to draw"></svg>
+				</div>
+			</div>
+			<div class="draw-toolbar">
+				<button type="button" class="text-button undo-button">Undo</button>
+				<button type="button" class="text-button clear-button">Clear</button>
+			</div>
+			<div class="action-buttons">
+				<button type="button" class="icon-button done-button" aria-label="Done">
+					<img src="doneButton.png" alt="Done">
+				</button>
+				<a class="icon-button home-button" href="index.html" aria-label="Back to shape selection">
+					<img src="homeButton.png" alt="Home">
+				</a>
+			</div>
+		</aside>
+		<script src="shapes.js" defer></script>
+		<script src="drawing.js" defer></script>
+	</body>
+</html>
