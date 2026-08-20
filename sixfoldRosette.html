@@ -3,7 +3,7 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Hexagon Activity</title>
+		<title>Six-Fold Rosette Activity</title>
 		<link rel="stylesheet" href="styles.css">
 	</head>
 	<body class="activity-page">
@@ -17,8 +17,13 @@
 		</div>
 		<aside class="sidebar">
 			<div class="outline-wrap">
-				<div class="shape-canvas">
-					<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="hexagon" role="img" aria-label="Hexagon outline; drag inside it to draw"></svg>
+				<div class="shape-canvas-stack">
+					<div class="shape-canvas">
+						<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="star" role="img" aria-label="Star outline; drag inside it to draw"></svg>
+					</div>
+					<div class="shape-canvas">
+						<svg class="shape-svg" viewBox="0 0 960 720" preserveAspectRatio="xMidYMid meet" data-shape="rhombus" role="img" aria-label="Rhombus outline; drag inside it to draw"></svg>
+					</div>
 				</div>
 			</div>
 			<div class="draw-toolbar">
@@ -36,6 +41,5 @@
 		</aside>
 		<script src="shapes.js" defer></script>
 		<script src="drawing.js" defer></script>
-		<script src="tessellation.js" defer></script>
 	</body>
 </html>

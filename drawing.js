@@ -129,6 +129,7 @@
 			this.strokes = []; // { points: [{x, y}], el: SVGPathElement, cloneGroup: SVGGElement|null }
 			this.activeStroke = null;
 			this.propagation = null; // { group: SVGGElement, transforms: string[] } — see setPropagation
+			this.onCommit = null; // optional callback fired after a stroke is committed — lets a page coordinate Undo across multiple canvases
 			this._nextStrokeId = 1;
 
 			this._onPointerDown = this._onPointerDown.bind(this);
@@ -208,6 +209,7 @@
 				if (this.activeStroke.cloneGroup) this.activeStroke.cloneGroup.remove();
 			} else {
 				this.strokes.push(this.activeStroke);
+				if (this.onCommit) this.onCommit();
 			}
 			this.activeStroke = null;
 		}
@@ -268,28 +270,61 @@
 		}
 	}
 
-	/** Build the shape outline and wire up drawing + toolbar buttons on the page. */
+	/**
+	 * Build the shape outline(s) and wire up drawing + toolbar buttons on the
+	 * page. Handles one .shape-svg (the common case) or several (e.g. a page
+	 * with two stacked canvases) — every canvas found gets its own
+	 * FreehandCanvas, but the Undo/Clear buttons are shared: Undo removes
+	 * whichever stroke was committed most recently across ALL canvases (via
+	 * a chronological log built from each canvas's onCommit), and Clear
+	 * wipes every canvas.
+	 *
+	 * Returns a single FreehandCanvas if there's exactly one .shape-svg (for
+	 * backwards compatibility with single-canvas pages), or an array of them
+	 * if there are several.
+	 */
 	function initShapeDrawing(root) {
 		root = root || document;
-		const svg = root.querySelector('.shape-svg');
-		if (!svg) return null;
+		const svgs = Array.from(root.querySelectorAll('.shape-svg'));
+		if (svgs.length === 0) return null;
 
-		const shapeName = svg.dataset.shape;
-		const strokesGroup = buildShapeSvg(svg, shapeName);
-		if (!strokesGroup) return null;
+		const undoLog = []; // chronological list of canvases, one entry per committed stroke, across all of them
 
-		const geometry = window.ShapeGeometry.SHAPES[shapeName];
-		const canvas = new FreehandCanvas(svg, strokesGroup, geometry.vertices);
+		const canvases = svgs
+			.map((svg) => {
+				const shapeName = svg.dataset.shape;
+				const strokesGroup = buildShapeSvg(svg, shapeName);
+				if (!strokesGroup) return null;
+
+				const geometry = window.ShapeGeometry.SHAPES[shapeName];
+				const canvas = new FreehandCanvas(svg, strokesGroup, geometry.vertices);
+				canvas.onCommit = () => undoLog.push(canvas);
+				return canvas;
+			})
+			.filter(Boolean);
+		if (canvases.length === 0) return null;
 
 		const undoButton = root.querySelector('.undo-button');
 		const clearButton = root.querySelector('.clear-button');
-		if (undoButton) undoButton.addEventListener('click', () => canvas.undo());
-		if (clearButton) clearButton.addEventListener('click', () => canvas.clear());
+		if (undoButton) {
+			undoButton.addEventListener('click', () => {
+				const mostRecent = undoLog.pop();
+				if (mostRecent) mostRecent.undo();
+			});
+		}
+		if (clearButton) {
+			clearButton.addEventListener('click', () => {
+				canvases.forEach((canvas) => canvas.clear());
+				undoLog.length = 0;
+			});
+		}
 
 		// Exposed so other modules (e.g. tessellation.js's propagation hookup)
-		// can find this canvas without needing their own reference to it.
-		window.ShapeDrawing.instance = canvas;
-		return canvas;
+		// can find these canvases without their own reference. An array when
+		// there are several — single-canvas pages keep getting a bare canvas.
+		const result = canvases.length === 1 ? canvases[0] : canvases;
+		window.ShapeDrawing.instance = result;
+		return result;
 	}
 
 	window.ShapeDrawing = { FreehandCanvas, initShapeDrawing, instance: null };
