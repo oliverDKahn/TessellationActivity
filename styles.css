@@ -1,0 +1,58 @@
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	background: #071535 url("nightBackground.png") center / cover no-repeat;
+	font-family: sans-serif;
+}
+
+.shape-choices {
+	align-items: center;
+	display: flex;
+	gap: clamp(1.5rem, 6vw, 5rem);
+	justify-content: center;
+	min-height: 100%;
+	padding: 2rem;
+}
+
+.shape-button {
+	display: block;
+	line-height: 0;
+	transition: transform 180ms ease;
+}
+
+.shape-button:hover,
+.shape-button:focus-visible {
+	transform: scale(1.08);
+}
+
+.shape-button:focus-visible {
+	outline: 3px solid white;
+	outline-offset: 8px;
+}
+
+.shape-button img {
+	display: block;
+	height: clamp(7rem, 20vw, 14rem);
+	object-fit: contain;
+	width: clamp(7rem, 20vw, 14rem);
+}
+
+@media (max-width: 600px) {
+	.shape-choices {
+		gap: 0.75rem;
+		padding: 1rem;
+	}
+
+	.shape-button img {
+		height: clamp(5rem, 27vw, 8rem);
+		width: clamp(5rem, 27vw, 8rem);
+	}
+}
