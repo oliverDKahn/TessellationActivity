@@ -17,6 +17,7 @@
 
 	const VIEWBOX_WIDTH = 960;
 	const VIEWBOX_HEIGHT = 720;
+	const PHI = (1 + Math.sqrt(5)) / 2; // golden ratio — see SHAPES.twelveFoldHexagon's derivation
 
 	/**
 	 * Vertices of a regular polygon on a circle of the given radius.
@@ -86,6 +87,112 @@
 		return { center, halfWidth, halfHeight, rotationDeg, vertices: rhombusVertices(center.x, center.y, halfWidth, halfHeight, rotationDeg) };
 	}
 
+	/**
+	 * Vertices of the girih "elongated hexagon" (aka "boat") tile from
+	 * twelveFoldShapes.svg: 4 edges of `shortEdge`, 2 of shortEdge*PHI, with
+	 * a fixed interior-angle sequence of 144, 108, 144, 108, 144, 72 degrees
+	 * (sum 720, as any simple hexagon's must) — the long/short edge ratio
+	 * isn't a free choice once those angles are fixed: walking the hexagon
+	 * as vectors and requiring them to sum to zero (a closed shape) forces
+	 * it to be exactly PHI (verified both algebraically and numerically).
+	 * The shape has one axis of symmetry, through its single 72-degree
+	 * vertex; this places that vertex at the top (screen convention: due
+	 * north), centered at (centerX, centerY).
+	 */
+	function elongatedHexagonVertices(centerX, centerY, shortEdge) {
+		const longEdge = shortEdge * PHI;
+		const turnsDeg = [36, 72, 36, 72, 36, 108]; // 180 - interior angle, applied cumulatively per vertex
+		const edgeLens = [shortEdge, shortEdge, shortEdge, shortEdge, longEdge, longEdge];
+
+		let dir = 0;
+		let cur = { x: 0, y: 0 };
+		const local = [cur];
+		for (let k = 0; k < 6; k++) {
+			const rad = (dir * Math.PI) / 180;
+			const next = { x: cur.x + edgeLens[k] * Math.cos(rad), y: cur.y + edgeLens[k] * Math.sin(rad) };
+			if (k < 5) local.push(next);
+			cur = next;
+			dir += turnsDeg[(k + 1) % 6];
+		}
+
+		// Recenter on the shape's own centroid, then rotate so the
+		// 72-degree vertex (index 5) points straight up.
+		const centroid = local.reduce((acc, p) => ({ x: acc.x + p.x / 6, y: acc.y + p.y / 6 }), { x: 0, y: 0 });
+		const centered = local.map((p) => ({ x: p.x - centroid.x, y: p.y - centroid.y }));
+		const currentAngleDeg = (Math.atan2(centered[5].y, centered[5].x) * 180) / Math.PI;
+		const rotation = ((-90 - currentAngleDeg) * Math.PI) / 180;
+		const cos = Math.cos(rotation);
+		const sin = Math.sin(rotation);
+		return centered.map((p) => ({ x: centerX + (p.x * cos - p.y * sin), y: centerY + (p.x * sin + p.y * cos) }));
+	}
+
+	/** center/shortEdge define an elongated hexagon; vertices are derived from them. */
+	function defineElongatedHexagon(center, shortEdge) {
+		return { center, shortEdge, vertices: elongatedHexagonVertices(center.x, center.y, shortEdge) };
+	}
+
+	/**
+	 * Hub-relative vertices of the "spiral tile" used on the Spiral Activity
+	 * page (twelveFoldShapes.html) — a hand-placed polygon built in the
+	 * spirit of Paul Gailiunas' "versatile" spiral tilings (Bridges 2000,
+	 * "Spiral Tilings"), not a pixel-exact reconstruction of his construction
+	 * (that would need precisely reverse-engineering a scanned diagram's
+	 * geometry, which didn't converge — this is the deliberately approximate
+	 * stand-in instead). Vertex 0 is the "hub": the boundary leaves it at
+	 * hub-relative angle 0 degrees and returns at 60 degrees, so the hub
+	 * angle is exactly 60 degrees and 6 copies rotated around it (see
+	 * spiralTilePinwheelPlacements) close a full turn with no gaps, the same
+	 * "six tiles fitted around a point" property Gailiunas' versatile has.
+	 * Angles increase strictly from 0 to 60 (a polar radius profile, not an
+	 * arbitrary polygon), which guarantees the boundary can't self-intersect.
+	 * The profile bulges out, dips concave, then bulges out again at
+	 * asymmetric angles (not mirrored around the 30-degree midline) — that
+	 * asymmetry is what gives copies arranged around the hub a pinwheel/
+	 * spiral look rather than a plain mirror-symmetric flower.
+	 */
+	function spiralTileLocalVertices() {
+		const boundary = [
+			{ angleDeg: 0, radius: 60 }, // spoke 1 tip
+			{ angleDeg: 10, radius: 95 }, // bulge out
+			{ angleDeg: 20, radius: 118 }, // outer tip (widest point)
+			{ angleDeg: 30, radius: 95 }, // shallow dip (also the arm-growth edge -- see spiralTileArmStep)
+			{ angleDeg: 45, radius: 92 }, // bulge back out
+			{ angleDeg: 60, radius: 60 }, // spoke 2 tip -- same radius as spoke 1, for hub closure
+		];
+		const hub = { x: 0, y: 0 };
+		return [
+			hub,
+			...boundary.map((p) => {
+				const rad = (p.angleDeg * Math.PI) / 180;
+				return { x: p.radius * Math.cos(rad), y: p.radius * Math.sin(rad) };
+			}),
+		];
+	}
+
+	/**
+	 * Places spiralTileLocalVertices at world scale/rotation/position:
+	 * rotates about the hub, scales, then translates so the shape's own
+	 * bounding-box center (not the hub itself, which sits off to one side of
+	 * the shape) lands at `centerX,centerY` — keeps the standalone shape
+	 * looking balanced on its canvas, same reasoning as
+	 * elongatedHexagonVertices' centroid-centering.
+	 */
+	function spiralTileVertices(centerX, centerY, scale, rotationDeg) {
+		const rad = (rotationDeg * Math.PI) / 180;
+		const cos = Math.cos(rad);
+		const sin = Math.sin(rad);
+		const rotated = spiralTileLocalVertices().map((p) => ({ x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos }));
+		const xs = rotated.map((p) => p.x);
+		const ys = rotated.map((p) => p.y);
+		const bboxCenter = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+		return rotated.map((p) => ({ x: centerX + (p.x - bboxCenter.x) * scale, y: centerY + (p.y - bboxCenter.y) * scale }));
+	}
+
+	/** center/scale/rotation define a spiral tile; vertices are derived from them. */
+	function defineSpiralTile(center, scale, rotationDeg) {
+		return { center, scale, rotationDeg, vertices: spiralTileVertices(center.x, center.y, scale, rotationDeg) };
+	}
+
 	const SHAPES = {
 		// Apex pointing up, flat base — rotation -90 puts the first vertex
 		// straight above the center.
@@ -115,6 +222,30 @@
 		threeShapeDodecagon: definePolygon(12, { x: 480, y: 360 }, 340, -75),
 		threeShapeHexagon: definePolygon(6, { x: 480, y: 360 }, 175.9969506697141, 0),
 		threeShapeSquare: definePolygon(4, { x: 480, y: 360 }, 124.44863728670911, 45),
+		// The 5-pointed star, 10-pointed star, and elongated hexagon from
+		// twelveFoldShapes.svg — a classic Islamic (girih-family) star
+		// pattern: a 10-pointed star surrounded by 5-pointed stars, bridged
+		// by elongated hexagons (see the screenshot in this project's
+		// history). The source art's point angles measured ~36.5-37 degrees
+		// (with some hand-drawn noise) — 36 degrees is the obviously
+		// intended exact value here (it's the defining angle of 5/10-fold
+		// geometry, 360/10), so these are exact regular stars built to hit
+		// a 36-degree point angle precisely, which fully determines each
+		// star's inner/outer radius ratio (there's no other free
+		// parameter). That in turn fixes the 10-star's edge length to be
+		// exactly PHI times the 5-star's (confirmed against the measured
+		// source art, which showed the same ~1.6x relationship) — matching
+		// twelveFoldHexagon's short/long edge, which is that same PHI
+		// relationship for the same underlying reason.
+		twelveFoldStar5: defineStar(5, { x: 480, y: 360 }, 152.05262246998575, 58.07893370497856, -90),
+		twelveFoldStar10: defineStar(10, { x: 480, y: 360 }, 340, 178.74857812050544, -90),
+		twelveFoldHexagon: defineElongatedHexagon({ x: 480, y: 360 }, 178.74857812050544 / PHI),
+		// -120 rotation points the hub's 60-degree wedge (bisector at local
+		// 30 degrees) straight up on screen; 4.818973751322179 is
+		// (960 - 2*80) / (rotated bounding-box width), the larger of the two
+		// fit-to-canvas ratios, chosen by that same 80-unit-padding standard
+		// as the other single-shape pages.
+		spiralTile: defineSpiralTile({ x: 480, y: 360 }, 4.818973751322179, -120),
 	};
 
 	/**
@@ -640,6 +771,229 @@
 		}));
 	}
 
+	/**
+	 * The "twelvefold" girih rosette motif (see the SHAPES comment above
+	 * twelveFoldStar5/10/Hexagon) built from one central 10-pointed star:
+	 * one elongated hexagon nestled into each of its 10 valleys, and one
+	 * 5-pointed star at each of its 10 points.
+	 *
+	 * Each hexagon nestles by matching its one 72-degree vertex (index 5,
+	 * whose two edges are both "long" — see defineElongatedHexagon) to a
+	 * valley's 72-degree notch (360 minus the star's 288-degree valley
+	 * angle) — both of the star's valley edges have the same length as the
+	 * hexagon's long edges, so they match exactly (see rigidEdgeTransform
+	 * for the "shared edges run in reverse" rule this relies on).
+	 *
+	 * Each 5-pointed star's point then exactly fills the wedge left over at
+	 * a star-point vertex between the two hexagons nestled in its adjacent
+	 * valleys: 36 (10-star point) + 144 (hexagon) + 36 (5-star point) + 144
+	 * (hexagon) = 360 degrees exactly — not a coincidence, but the reason
+	 * these three shapes' angles/edges were derived the way they were (see
+	 * the SHAPES comment). Pinning the 5-star's point (vertex 0) and one
+	 * neighbor (vertex 1) onto that shared vertex and the "before" hexagon's
+	 * free edge is enough to fully place it (a rigid transform needs only 2
+	 * point correspondences) — its other neighbor (vertex 9) then lands
+	 * exactly on the "after" hexagon's free edge too, with no further
+	 * matching needed (verified numerically to floating-point precision).
+	 *
+	 * Returns { hexTransforms, starTransforms }, 10 native-scale transforms
+	 * each, mapping SHAPES.twelveFoldHexagon / twelveFoldStar5's own
+	 * vertices onto their place in the rosette.
+	 */
+	function twelveFoldRosettePlacements(star10, star5, hexagon) {
+		const hexByValley = new Map();
+		for (let i = 1; i < star10.vertices.length; i += 2) {
+			const next = star10.vertices[(i + 1) % star10.vertices.length];
+			hexByValley.set(i, rigidEdgeTransform(hexagon.vertices[4], hexagon.vertices[5], next, star10.vertices[i]));
+		}
+
+		const starTransforms = [];
+		for (let j = 0; j < star10.vertices.length; j += 2) {
+			const valleyBefore = (j - 1 + star10.vertices.length) % star10.vertices.length;
+			const hexBeforeFreeEdge = applyMatrix(hexByValley.get(valleyBefore), hexagon.vertices[3]);
+			starTransforms.push(rigidEdgeTransform(star5.vertices[0], star5.vertices[1], star10.vertices[j], hexBeforeFreeEdge));
+		}
+
+		return { hexTransforms: Array.from(hexByValley.values()), starTransforms };
+	}
+
+	/** Rotate a point by `deg` degrees around `aboutCenter`. */
+	function rotatePointAround(point, aboutCenter, deg) {
+		const rad = (deg * Math.PI) / 180;
+		const cos = Math.cos(rad);
+		const sin = Math.sin(rad);
+		const dx = point.x - aboutCenter.x;
+		const dy = point.y - aboutCenter.y;
+		return { x: aboutCenter.x + dx * cos - dy * sin, y: aboutCenter.y + dx * sin + dy * cos };
+	}
+
+	/**
+	 * Native-scale bounding-circle radius of one full twelvefold rosette
+	 * (see twelveFoldRosettePlacements) around its own center — the
+	 * farthest any vertex, across the star10, its 10 hexagons, and its 10
+	 * five-pointed stars, gets from the star's own center.
+	 */
+	function twelveFoldRosetteRadius(star10, star5, hexagon) {
+		const { hexTransforms, starTransforms } = twelveFoldRosettePlacements(star10, star5, hexagon);
+		const allPoints = [
+			...star10.vertices,
+			...hexTransforms.flatMap((t) => hexagon.vertices.map((v) => applyMatrix(t, v))),
+			...starTransforms.flatMap((t) => star5.vertices.map((v) => applyMatrix(t, v))),
+		];
+		return Math.max(...allPoints.map((p) => distance(p, star10.center)));
+	}
+
+	/**
+	 * Tiles `rings` rings of complete twelvefold rosettes (see
+	 * twelveFoldRosettePlacements) around a center copy — rings=1 gives 7
+	 * ("one plus a ring of six"), same convention as sixfoldRosetteTiling.
+	 *
+	 * Unlike the hexagon-based tessellations, copies here aren't
+	 * edge-matched: true 10-fold rotational symmetry can't tile a 2D plane
+	 * (the crystallographic restriction theorem allows only 1-, 2-, 3-,
+	 * 4-, and 6-fold), so a repeating grid of these rosettes necessarily
+	 * leaves gaps between copies — same trade real Islamic 10-fold star
+	 * patterns make, usually by filling those gaps with unrelated tiles.
+	 * Copies are instead packed as densely as geometrically guaranteed
+	 * possible: spaced apart by exactly twice one rosette's own bounding
+	 * radius (see twelveFoldRosetteRadius), the minimum center-to-center
+	 * distance at which two copies can never overlap (verified numerically
+	 * — zero overlapping polygons at any ring count). The ring itself is
+	 * rotated 30 degrees from hexRingCenters' own orientation, so the
+	 * cluster comes out wider than tall rather than the reverse.
+	 *
+	 * Then uniformly scales and centers the whole assembly to fit within
+	 * maxWidth x maxHeight (with `padding` clearance) — same overall shape
+	 * as sixfoldRosetteTiling/threeShapeTiling. Returns an array of {
+	 * star10Transform, hexTransforms, starTransforms }, one entry per
+	 * rosette copy.
+	 */
+	function twelveFoldTiling(star10, star5, hexagon, rings, maxWidth, maxHeight, padding) {
+		const { hexTransforms, starTransforms } = twelveFoldRosettePlacements(star10, star5, hexagon);
+		const spacing = twelveFoldRosetteRadius(star10, star5, hexagon) * 2;
+		const centers = hexRingCenters(star10.center, spacing, rings).map((c) => rotatePointAround(c, star10.center, 30));
+
+		const nativePerCopy = centers.map((copyCenter) => {
+			const delta = { x: copyCenter.x - star10.center.x, y: copyCenter.y - star10.center.y };
+			const translateOnly = (t) => ({ a: t.a, b: t.b, c: t.c, d: t.d, e: t.e + delta.x, f: t.f + delta.y });
+			return {
+				star10Transform: { a: 1, b: 0, c: 0, d: 1, e: delta.x, f: delta.y },
+				hexTransforms: hexTransforms.map(translateOnly),
+				starTransforms: starTransforms.map(translateOnly),
+			};
+		});
+
+		const allPoints = nativePerCopy.flatMap(({ star10Transform, hexTransforms: hts, starTransforms: sts }) => [
+			...star10.vertices.map((v) => applyMatrix(star10Transform, v)),
+			...hts.flatMap((t) => hexagon.vertices.map((v) => applyMatrix(t, v))),
+			...sts.flatMap((t) => star5.vertices.map((v) => applyMatrix(t, v))),
+		]);
+		const xs = allPoints.map((p) => p.x);
+		const ys = allPoints.map((p) => p.y);
+		const width = Math.max(...xs) - Math.min(...xs);
+		const height = Math.max(...ys) - Math.min(...ys);
+		const patternCenter = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+		const scale = Math.min((maxWidth - 2 * padding) / width, (maxHeight - 2 * padding) / height);
+		const canvasCenter = { x: maxWidth / 2, y: maxHeight / 2 };
+		const translate = { x: canvasCenter.x - scale * patternCenter.x, y: canvasCenter.y - scale * patternCenter.y };
+
+		return nativePerCopy.map(({ star10Transform, hexTransforms: hts, starTransforms: sts }) => ({
+			star10Transform: composeScaleTranslate(star10Transform, scale, translate),
+			hexTransforms: hts.map((t) => composeScaleTranslate(t, scale, translate)),
+			starTransforms: sts.map((t) => composeScaleTranslate(t, scale, translate)),
+		}));
+	}
+
+	/** Compose two {a,b,c,d,e,f} affine matrices: applying the result equals applying `inner` then `outer`. */
+	function composeTransforms(outer, inner) {
+		return {
+			a: outer.a * inner.a + outer.c * inner.b,
+			b: outer.b * inner.a + outer.d * inner.b,
+			c: outer.a * inner.c + outer.c * inner.d,
+			d: outer.b * inner.c + outer.d * inner.d,
+			e: outer.a * inner.e + outer.c * inner.f + outer.e,
+			f: outer.b * inner.e + outer.d * inner.f + outer.f,
+		};
+	}
+
+	/**
+	 * The fixed rigid transform (rotation ~19.5 degrees, scale 1) mapping
+	 * one spiral tile copy onto the next copy in an outward-growing arm: the
+	 * next copy's own hub->B1 edge (vertices 0->1) glued onto the current
+	 * copy's B3->B4 edge (vertices 3->4), reversed (see rigidEdgeTransform's
+	 * docs for why reversed). Composing this transform with itself is what
+	 * spiralTileArmPlacements walks along to grow an arm.
+	 *
+	 * This specific edge (near the tile's outer tip) was chosen, over the
+	 * tile's other 4 outer edges, because repeated chaining along it never
+	 * re-enters a neighboring petal's own wedge — verified numerically
+	 * across all 5 candidate edges: the other 4 all curl back into an
+	 * adjacent arm within 1-3 tiles. B4's exact position (see
+	 * spiralTileLocalVertices) was in turn tuned along that same edge to
+	 * give this transform a visible ~20-degree curl rather than the near-0
+	 * curl (a nearly straight spike, not a spiral) the tile's first-draft B4
+	 * gave here.
+	 */
+	function spiralTileArmStep(tile) {
+		return rigidEdgeTransform(tile.vertices[0], tile.vertices[1], tile.vertices[4], tile.vertices[3]);
+	}
+
+	/**
+	 * Native-scale transforms for a full 6-armed spiral assembly (the Spiral
+	 * Activity page's tessellation border): 6 copies of the tile fitted
+	 * around its own hub (vertex 0) with no gaps — the hub's 60-degree wedge
+	 * angle is exactly what makes 6 copies close a full turn, same idea as
+	 * the other rosette placements in this file — each then extended
+	 * outward by `generations - 1` further copies chained edge-to-edge via
+	 * spiralTileArmStep.
+	 *
+	 * Because that chaining is a fixed rotation about an off-center pivot
+	 * (not a translation), each arm's tiles trace a widening circular arc
+	 * that peaks and would eventually curl back in on itself, rather than
+	 * growing outward forever the way Gailiunas' actual spiral tilings do —
+	 * `generations` needs to stay under that peak (around 10 for this tile,
+	 * verified numerically) for every arm to read as growing outward, not
+	 * turning back toward the center or overlapping a neighboring arm.
+	 */
+	function spiralTileArmPlacements(tile, generations) {
+		const hub = tile.vertices[0];
+		const step = spiralTileArmStep(tile);
+		const identity = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+
+		const placements = [];
+		for (let k = 0; k < 6; k++) {
+			const petalRotation = rotatedSimilarityTransform(hub, 1, 60 * k, hub);
+			let chainStep = identity;
+			for (let g = 0; g < generations; g++) {
+				placements.push(composeTransforms(petalRotation, chainStep));
+				chainStep = composeTransforms(step, chainStep);
+			}
+		}
+		return placements;
+	}
+
+	/**
+	 * Scales and centers a full spiralTileArmPlacements assembly to fit
+	 * within maxWidth x maxHeight (with `padding` clearance) — same overall
+	 * shape as the other *Tiling functions in this file. Returns the final
+	 * array of transforms, one per tile in the assembly (6 * generations
+	 * total), each mapping the tile's OWN vertices onto its place in the
+	 * spiral.
+	 */
+	function spiralTileTiling(tile, generations, maxWidth, maxHeight, padding) {
+		const placements = spiralTileArmPlacements(tile, generations);
+		const allPoints = placements.flatMap((t) => tile.vertices.map((v) => applyMatrix(t, v)));
+		const xs = allPoints.map((p) => p.x);
+		const ys = allPoints.map((p) => p.y);
+		const width = Math.max(...xs) - Math.min(...xs);
+		const height = Math.max(...ys) - Math.min(...ys);
+		const patternCenter = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+		const scale = Math.min((maxWidth - 2 * padding) / width, (maxHeight - 2 * padding) / height);
+		const canvasCenter = { x: maxWidth / 2, y: maxHeight / 2 };
+		const translate = { x: canvasCenter.x - scale * patternCenter.x, y: canvasCenter.y - scale * patternCenter.y };
+		return placements.map((t) => composeScaleTranslate(t, scale, translate));
+	}
+
 	/** Standard ray-casting point-in-polygon test. */
 	function isPointInPolygon(point, vertices) {
 		let inside = false;
@@ -661,6 +1015,7 @@
 		regularPolygonVertices,
 		starVertices,
 		rhombusVertices,
+		elongatedHexagonVertices,
 		hexTriangleGridLineFamily,
 		hexagonTriangleCells,
 		rotatedSimilarityTransform,
@@ -678,6 +1033,13 @@
 		sixfoldRosetteTiling,
 		threeShapeRingPlacements,
 		threeShapeTiling,
+		twelveFoldRosettePlacements,
+		twelveFoldRosetteRadius,
+		twelveFoldTiling,
+		composeTransforms,
+		spiralTileArmStep,
+		spiralTileArmPlacements,
+		spiralTileTiling,
 		pointsAttr,
 		isPointInPolygon,
 		distance,

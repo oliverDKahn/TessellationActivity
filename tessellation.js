@@ -247,8 +247,9 @@
 	 * across THREE_SHAPE_RINGS rings of dodecagons. Structurally identical
 	 * to buildSixfoldRosetteTessellation (no per-cell clip-path, since
 	 * every cell is an exact similarity-transformed copy of its own
-	 * already-constrained master shape) but with three master shapes
-	 * instead of two.
+	 * already-constrained master shape; three independent
+	 * propagationTargets, one per master shape, instead of two) but with
+	 * three master shapes instead of two.
 	 */
 	function buildThreeShapeTessellation(svg) {
 		const G = window.ShapeGeometry;
@@ -263,6 +264,11 @@
 			stroke: LINE_COLOR,
 			'stroke-width': String(LINE_WIDTH),
 		});
+		// Separate per-shape, always-visible targets for propagated strokes —
+		// kept out of linesGroup so drawings stay visible with borders off.
+		const dodecagonStrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+		const hexagonStrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+		const squareStrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
 
 		const dodecagonPoints = G.pointsAttr(dodecagon.vertices);
 		const hexagonPoints = G.pointsAttr(hexagon.vertices);
@@ -284,9 +290,135 @@
 			});
 		});
 
-		svg.append(linesGroup);
+		svg.append(linesGroup, dodecagonStrokesTarget, hexagonStrokesTarget, squareStrokesTarget);
 
-		return { linesGroup };
+		const dodecagonTransforms = tiling.map((t) => G.svgMatrixString(t.dodecagonTransform));
+		const hexagonTransforms = tiling.flatMap((t) => t.hexTransforms.map((ht) => G.svgMatrixString(ht)));
+		const squareTransforms = tiling.flatMap((t) => t.squareTransforms.map((st) => G.svgMatrixString(st)));
+
+		return {
+			linesGroup,
+			propagationTargets: [
+				{ shapeName: 'threeShapeDodecagon', group: dodecagonStrokesTarget, transforms: dodecagonTransforms },
+				{ shapeName: 'threeShapeHexagon', group: hexagonStrokesTarget, transforms: hexagonTransforms },
+				{ shapeName: 'threeShapeSquare', group: squareStrokesTarget, transforms: squareTransforms },
+			],
+		};
+	}
+
+	// twelveFoldShapes.html's tessellation-svg uses its own, wider viewBox
+	// (see the HTML) instead of ShapeGeometry's shared 960x720 — a cluster
+	// of rings of whole rosettes (see twelveFoldTiling's docs) comes out
+	// noticeably wider than tall, unlike the other tessellations here.
+	const TWELVE_FOLD_VIEWBOX_WIDTH = 1100;
+	const TWELVE_FOLD_VIEWBOX_HEIGHT = 1000;
+	const TWELVE_FOLD_PADDING = 50;
+	const TWELVE_FOLD_RINGS = 1; // 1 ring = 7 whole rosettes = 7 ten-pointed stars
+
+	/**
+	 * The "twelvefold" girih rosette — a 10-pointed star with a hexagon
+	 * nestled into each of its 10 valleys and a 5-pointed star at each of
+	 * its 10 points (see twelveFoldRosettePlacements in shapes.js) —
+	 * repeated across TWELVE_FOLD_RINGS rings of whole rosette copies (see
+	 * twelveFoldTiling's docs for why they're spaced apart rather than
+	 * edge-matched like the other tessellations here). Three independent
+	 * propagationTargets, one per master shape (twelveFoldStar10 only ever
+	 * needs translating; the hexagons and 5-pointed stars need whatever
+	 * rotation each one took to nestle into place) — same structure as
+	 * buildSixfoldRosetteTessellation/buildThreeShapeTessellation.
+	 */
+	function buildTwelveFoldTessellation(svg) {
+		const G = window.ShapeGeometry;
+		const star10 = G.SHAPES.twelveFoldStar10;
+		const star5 = G.SHAPES.twelveFoldStar5;
+		const hexagon = G.SHAPES.twelveFoldHexagon;
+		const tiling = G.twelveFoldTiling(star10, star5, hexagon, TWELVE_FOLD_RINGS, TWELVE_FOLD_VIEWBOX_WIDTH, TWELVE_FOLD_VIEWBOX_HEIGHT, TWELVE_FOLD_PADDING);
+
+		const linesGroup = createSvgEl('g', {
+			class: 'tessellation-lines',
+			fill: 'none',
+			stroke: LINE_COLOR,
+			'stroke-width': String(LINE_WIDTH),
+		});
+		// Separate per-shape, always-visible targets for propagated strokes —
+		// kept out of linesGroup so drawings stay visible with borders off.
+		const star10StrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+		const hexagonStrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+		const star5StrokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+
+		const star10Points = G.pointsAttr(star10.vertices);
+		const hexagonPoints = G.pointsAttr(hexagon.vertices);
+		const star5Points = G.pointsAttr(star5.vertices);
+		tiling.forEach(({ star10Transform, hexTransforms, starTransforms }) => {
+			const star10Group = createSvgEl('g', { transform: G.svgMatrixString(star10Transform) });
+			star10Group.appendChild(createSvgEl('polygon', { points: star10Points }));
+			linesGroup.appendChild(star10Group);
+
+			hexTransforms.forEach((t) => {
+				const hexGroup = createSvgEl('g', { transform: G.svgMatrixString(t) });
+				hexGroup.appendChild(createSvgEl('polygon', { points: hexagonPoints }));
+				linesGroup.appendChild(hexGroup);
+			});
+
+			starTransforms.forEach((t) => {
+				const starGroup = createSvgEl('g', { transform: G.svgMatrixString(t) });
+				starGroup.appendChild(createSvgEl('polygon', { points: star5Points }));
+				linesGroup.appendChild(starGroup);
+			});
+		});
+
+		svg.append(linesGroup, star10StrokesTarget, hexagonStrokesTarget, star5StrokesTarget);
+
+		const star10Transforms = tiling.map((c) => G.svgMatrixString(c.star10Transform));
+		const hexagonTransforms = tiling.flatMap((c) => c.hexTransforms.map((t) => G.svgMatrixString(t)));
+		const star5Transforms = tiling.flatMap((c) => c.starTransforms.map((t) => G.svgMatrixString(t)));
+
+		return {
+			linesGroup,
+			propagationTargets: [
+				{ shapeName: 'twelveFoldStar10', group: star10StrokesTarget, transforms: star10Transforms },
+				{ shapeName: 'twelveFoldHexagon', group: hexagonStrokesTarget, transforms: hexagonTransforms },
+				{ shapeName: 'twelveFoldStar5', group: star5StrokesTarget, transforms: star5Transforms },
+			],
+		};
+	}
+
+	const SPIRAL_TILE_PADDING = 40;
+	const SPIRAL_TILE_GENERATIONS = 9; // tiles per arm (54 tiles total) -- see spiralTileArmPlacements's docs for why not more
+
+	/**
+	 * The approximate "spiral tile" six-armed assembly (see
+	 * spiralTileTiling in shapes.js — an illustrative stand-in for
+	 * Gailiunas' versatile spiral tilings, not a pixel-exact reconstruction
+	 * of his construction) built around one central hub. Single master
+	 * shape, so this returns the single-shape strokesTarget/transforms pair
+	 * like buildTriangleTessellation/buildSquareTessellation/
+	 * buildHexagonTessellation, not propagationTargets.
+	 */
+	function buildSpiralTileTessellation(svg) {
+		const G = window.ShapeGeometry;
+		const tile = G.SHAPES.spiralTile;
+		const placements = G.spiralTileTiling(tile, SPIRAL_TILE_GENERATIONS, G.VIEWBOX_WIDTH, G.VIEWBOX_HEIGHT, SPIRAL_TILE_PADDING);
+
+		const linesGroup = createSvgEl('g', {
+			class: 'tessellation-lines',
+			fill: 'none',
+			stroke: LINE_COLOR,
+			'stroke-width': String(LINE_WIDTH),
+		});
+		const strokesTarget = createSvgEl('g', { class: 'tessellation-strokes' });
+
+		const tilePoints = G.pointsAttr(tile.vertices);
+		placements.forEach((t) => {
+			const group = createSvgEl('g', { transform: G.svgMatrixString(t) });
+			group.appendChild(createSvgEl('polygon', { points: tilePoints }));
+			linesGroup.appendChild(group);
+		});
+
+		svg.append(linesGroup, strokesTarget);
+
+		const transforms = placements.map((t) => G.svgMatrixString(t));
+		return { linesGroup, strokesTarget, transforms };
 	}
 
 	const TESSELLATION_BUILDERS = {
@@ -295,6 +427,8 @@
 		hexagon: buildHexagonTessellation,
 		sixfoldRosette: buildSixfoldRosetteTessellation,
 		threeShape: buildThreeShapeTessellation,
+		twelveFold: buildTwelveFoldTessellation,
+		spiral: buildSpiralTileTessellation,
 	};
 
 	/** Find the workspace tessellation SVG + toggle button and wire everything together. */
@@ -307,10 +441,14 @@
 		if (!builder) return null;
 
 		const { linesGroup, strokesTarget, transforms, propagationTargets } = builder(svg);
-		linesGroup.classList.add('is-hidden'); // hidden until the button is first pressed
 
+		// Pages with a "Toggle Borders" button start with the border hidden
+		// until it's first pressed; pages without one (e.g. the Spiral
+		// Activity page) have no way to un-hide it, so their border just
+		// stays permanently visible, same as a static tessellation preview.
 		const button = root.querySelector('.borders-button');
 		if (button) {
+			linesGroup.classList.add('is-hidden');
 			button.addEventListener('click', () => {
 				const nowHidden = linesGroup.classList.toggle('is-hidden');
 				button.setAttribute('aria-pressed', String(!nowHidden));
